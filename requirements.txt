@@ -1,3 +1,4 @@
 gunicorn
 aiogram
 psycopg2-binary
+asyncpg

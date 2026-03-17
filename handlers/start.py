@@ -114,8 +114,12 @@ async def cmd_start(message: types.Message, db_pool, bot: Bot):
 
 # --- 4. TUGMALAR BOSILGANDA LIFT VA ESKALATOR EFFEKTI ---
 
+# --- 4. TUGMALAR BOSILGANDA LIFT VA ESKALATOR EFFEKTI ---
+
 @router.message(F.text == "🏢 Tadbirkorlar zali (Ish beruvchi)")
-async def emp_reg(message: types.Message, bot: Bot):
+async def emp_reg(message: types.Message, bot: Bot, state: FSMContext):
+    await state.set_state(Registration.waiting_for_employer_name) # Holatni o'rnatish
+    
     await bot.send_chat_action(chat_id=message.chat.id, action="upload_document")
     status = await message.answer("🛗 <b>Lift:</b> <i>10-qavatga ko'tarilmoqdasiz...</i>", parse_mode="HTML")
     await asyncio.sleep(1.2)
@@ -130,8 +134,27 @@ async def emp_reg(message: types.Message, bot: Bot):
         parse_mode="HTML"
     )
 
+# ISMNI QABUL QILISH (Ish beruvchi uchun)
+@router.message(Registration.waiting_for_employer_name)
+async def process_employer_name(message: types.Message, state: FSMContext):
+    await state.update_data(full_name=message.text) # Ismni saqlab qo'yamiz
+    
+    # Kontakt yuborish tugmasini chiqarish
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="📱 Kontaktni yuborish", request_contact=True)
+    
+    await message.answer(
+        f"🤝 Rahmat, <b>{message.text}</b>!\n"
+        "Endi siz bilan bog'lanishimiz uchun kontaktingizni yuboring:",
+        reply_markup=builder.as_markup(resize_keyboard=True),
+        parse_mode="HTML"
+    )
+    await state.clear() # Yoki keyingi bosqichga o'tkazish
+
 @router.message(F.text == "🔍 Kadrlar bo'limi (Nomzod)")
-async def cand_reg(message: types.Message, bot: Bot):
+async def cand_reg(message: types.Message, bot: Bot, state: FSMContext):
+    await state.set_state(Registration.waiting_for_candidate_name) # Holatni o'rnatish
+    
     await bot.send_chat_action(chat_id=message.chat.id, action="find_location")
     status = await message.answer("🪜 <b>Eskalator:</b> <i>2-qavatga chiqmoqdasiz...</i>", parse_mode="HTML")
     await asyncio.sleep(1.2)
@@ -146,46 +169,25 @@ async def cand_reg(message: types.Message, bot: Bot):
         "📌 <b>Ism va familiyangizni kiriting:</b>", 
         parse_mode="HTML"
     )
-@router.message(F.contact)
-async def process_contact(message: types.Message, db_pool, bot: Bot):
-    user_id = message.from_user.id
-    phone = message.contact.phone_number
-    full_name = message.from_user.full_name
 
-    # Vizual effekt: Ma'lumotlarni bazaga yozish "muhrlash" kabi ko'rinsin
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
+# ISMNI QABUL QILISH (Nomzod uchun)
+@router.message(Registration.waiting_for_candidate_name)
+async def process_candidate_name(message: types.Message, state: FSMContext, db_pool: any):
+    full_name = message.text
+    user_id = message.from_user.id
     
+    # Nomzodni bazaga yozish
     async with db_pool.acquire() as conn:
         await conn.execute("""
-            INSERT INTO users (user_id, full_name, phone, role)
-            VALUES ($1, $2, $3, 'employer')
-            ON CONFLICT (user_id) DO UPDATE SET phone = $3, role = 'employer'
-        """, user_id, full_name, phone)
+            INSERT INTO users (user_id, full_name, role)
+            VALUES ($1, $2, 'candidate')
+            ON CONFLICT (user_id) DO UPDATE SET full_name = $2, role = 'candidate'
+        """, user_id, full_name)
 
-    # 1. Kontakt qabul qilinganda (Eski klaviaturani o'chirish)
     await message.answer(
-        "📝 <b>Kotiba:</b>\n"
-        "<blockquote>\"Rahmat. Ma'lumotlaringizni bino ro'yxatga olish kitobiga kiritib qo'ydim. "
-        "Raqamingiz tasdiqlandi.\"</blockquote>", 
-        reply_markup=ReplyKeyboardRemove(),
+        f"✅ <b>{full_name}</b>, siz muvaffaqiyatli ro'yxatdan o'tdingiz!\n"
+        "Endi nomzodlar panelidan foydalanishingiz mumkin.",
+        reply_markup=candidate_panel_keyboard(),
         parse_mode="HTML"
     )
-    
-    await asyncio.sleep(1) # Kichik tanaffus effekt uchun
-
-    # 2. Muvaffaqiyatli yakun va tarif tanlash (Ofis tanlash)
-    final_text = (
-        "✅ <b>RO'YXATDAN O'TISH YAKUNLANDI</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "👨‍💼 <b>Administrator:</b>\n"
-        "<blockquote>\"Tabriklayman! Endi siz markazimizning rasmiy a'zosisiz. "
-        "E'lon berishni boshlash uchun o'z biznesingiz darajasiga mos keladigan "
-        "<b>Ofis (Tarif)</b> turini tanlang. Har bir qavatda imkoniyatlar turlicha!\"</blockquote>\n"
-        "👇 <b>Marhamat, tanlov qiling:</b>"
-    )
-    
-    await message.answer(
-        final_text, 
-        reply_markup=room_types_keyboard(),
-        parse_mode="HTML"
-    )
+    await state.clear()

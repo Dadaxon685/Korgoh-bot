@@ -10,6 +10,13 @@ from keyboards.inlines import (
     room_types_keyboard
 )
 
+
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+
+class Registration(StatesGroup):
+    waiting_for_employer_name = State()
+    waiting_for_candidate_name = State()
 router = Router()
 
 import asyncio

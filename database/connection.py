@@ -6,30 +6,20 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import os
+import asyncpg
+
 async def create_db_pool():
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        print("❌ DATABASE_URL topilmadi!")
-        return None
-
-    # asyncpg uchun formatni to'g'rilash
-    if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
-
     try:
-        # Xatoni keltirib chiqargan 'connect_timeout' olib tashlandi
-        # O'rniga 'command_timeout' ishlatish mumkin yoki shunchaki o'chirib qo'ying
         pool = await asyncpg.create_pool(
-            dsn=url,
-            ssl='require' if "railway.internal" not in url else None,
-            command_timeout=60  # connect_timeout o'rniga shu ishlatiladi
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASS"),
+            database=os.getenv("DB_NAME"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT"),
+            ssl='require' # Tashqi ulanish uchun shart
         )
-        
-        async with pool.acquire() as conn:
-            await conn.execute("SELECT 1")
-            
-        print("✅ Baza bilan aloqa muvaffaqiyatli o'rnatildi!")
+        print("✅ Baza ulandi!")
         return pool
     except Exception as e:
-        print(f"❌ XATOLIK: {e}")
-        return None
+        print(f"❌ Xato: {e}")

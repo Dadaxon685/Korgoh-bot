@@ -3,3 +3,4 @@ aiogram
 psycopg2-binary
 asyncpg
 dotenv
+pandas

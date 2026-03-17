@@ -241,6 +241,29 @@ async def show_panel(message: types.Message, db_pool):
     # Admin tekshiruvi
     if str(user_id) == os.getenv("ADMIN_ID"):
         await message.answer("👑 **Admin paneli**", reply_markup=admin_panel_keyboard())
+
+
+from aiogram.filters import Command
+
+@router.message(Command("panel"))
+async def show_employer_panel(message: types.Message, db_pool):
+    user_id = message.from_user.id
+    
+    async with db_pool.acquire() as conn:
+        # Foydalanuvchining xona raqamini bazadan qidiramiz
+        room = await conn.fetchrow("SELECT room_number FROM rooms WHERE owner_id = $1", user_id)
+        
+    if room:
+        room_num = room['room_number']
+        text = (
+            f"🏢 Sizning boshqaruv panelingiz\n"
+            f"Xona raqami: `{room_num}`\n\n"
+            f"Quyidagi amallardan birini tanlang:"
+        )
+        await message.answer(text, reply_markup=employer_panel_keyboard(room_num), parse_mode="Markdown")
+    else:
+        # Agar xonasi bo'lmasa
+        await message.answer("❌ Kechirasiz, sizda hali faol ofis (xona) mavjud emas.")
         # 1. Sohani tanlash (New Ad bosilganda)
 # 1. Boshlanishi: Sohani tanlash
 @router.callback_query(F.data == "new_ad")

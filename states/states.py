@@ -46,7 +46,7 @@ class CandidateProfile(StatesGroup):
 from aiogram.fsm.state import State, StatesGroup
 
 class EmployerReg(StatesGroup):
-    waiting_name = State()
+    waiting_namee = State()
     waiting_phone = State()
 
 

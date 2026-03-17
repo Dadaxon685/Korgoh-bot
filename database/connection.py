@@ -1,27 +1,22 @@
-import asyncpg
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+import asyncpg
 
 async def create_db_pool():
+    # Railway-dagi DATABASE_URL ni o'qiymiz
+    DATABASE_URL = os.getenv("DATABASE_URL")
+    
+    # Agar mahalliy kompyuterda bo'lsangiz va DATABASE_URL bo'lmasa, eskisini ishlatadi
+    if not DATABASE_URL:
+        DATABASE_URL = "postgres://postgres:parol@127.0.0.1:5432/korgoh_db"
+
+    # asyncpg ba'zan 'postgres://' ni xush ko'rmaydi, 'postgresql://' qilish kerak
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
     try:
-        # Parametrlarni chop etamiz (parolni yashirin tutgan holda)
-        print(f"🔄 Ulanishga urinish: {os.getenv('DB_USER')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}")
-        
-        pool = await asyncpg.create_pool(
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASS"),
-            database=os.getenv("DB_NAME"),
-            host=os.getenv("DB_HOST", "127.0.0.1"),
-            port=int(os.getenv("DB_PORT", 5432)),
-            # Ulanish vaqtini biroz uzaytiramiz
-            command_timeout=60
-        )
-        print("✅ PostgreSQL bazasiga ulanish muvaffaqiyatli!")
+        pool = await asyncpg.create_pool(dsn=DATABASE_URL)
+        print("✅ Baza bilan aloqa o'rnatildi!")
         return pool
     except Exception as e:
-        print("\n❌ BAZAGA ULANISHDA XATOLIK:")
-        print(f"Xabar: {e}")
-        print("-" * 30)
+        print(f"❌ BAZAGA ULANISHDA XATOLIK: {e}")
         return None

@@ -353,7 +353,84 @@ async def send_to_employer(callback: types.CallbackQuery, state: FSMContext, bot
     await state.clear()
 
 
+import json
+import logging
+from aiogram import Router, F, types
+from aiogram.fsm.context import FSMContext
 
+router = Router()
+
+@router.callback_query(F.data.startswith("fav_"))
+async def save_to_favorites(callback: types.CallbackQuery, db_pool, state: FSMContext):
+    """
+    Nomzodni saqlanganlar ro'yxatiga qo'shish (PostgreSQL + JSONB)
+    """
+    # 1. Callbackdan nomzod ID-sini olamiz (fav_12345678)
+    try:
+        candidate_id = int(callback.data.split("_")[1])
+    except (IndexError, ValueError):
+        return await callback.answer("❌ ID xatosi", show_alert=True)
+
+    employer_id = callback.from_user.id
+    
+    # 2. State-dan ariza ma'lumotlarini olamiz
+    data = await state.get_data()
+    answers = data.get('answers', {})
+    direction = data.get('direction', "Ko'rsatilmagan")
+    
+    # Agar state bo'sh bo'lsa (masalan, vaqt o'tib ketgan bo'lsa), 
+    # caption-dan nomzod ismini ajratib olishga harakat qilamiz
+    candidate_name = "Noma'lum"
+    if callback.message.caption:
+        # Captionning 3-qatorida ism bor deb hisoblaymiz (oldingi kodingizga binoan)
+        lines = callback.message.caption.split('\n')
+        for line in lines:
+            if "Nomzod:" in line:
+                candidate_name = line.replace("👤 Nomzod:", "").strip()
+
+    # Bazaga saqlash uchun lug'at (dict) tayyorlaymiz
+    favorite_data = {
+        "full_name": candidate_name,
+        "direction": direction,
+        "answers": answers
+    }
+    
+    # Lug'atni JSON stringga o'giramiz
+    info_json = json.dumps(favorite_data)
+
+    # 3. PostgreSQL-ga yozish
+    async with db_pool.acquire() as conn:
+        try:
+            # ON CONFLICT orqali dublikatni oldini olamiz va ma'lumotni yangilaymiz
+            await conn.execute("""
+                INSERT INTO favorites (user_id, candidate_id, info_json)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, candidate_id) 
+                DO UPDATE SET info_json = $3, created_at = CURRENT_TIMESTAMP
+            """, employer_id, candidate_id, info_json)
+            
+            await callback.answer("⭐ Nomzod saqlanganlarga qo'shildi!", show_alert=False)
+            
+            # Tugmani yangilash (foydalanuvchiga saqlanganini bildirish uchun)
+            current_kb = callback.message.reply_markup.inline_keyboard
+            new_kb_list = []
+            for row in current_kb:
+                new_row = []
+                for button in row:
+                    if button.callback_data == callback.data:
+                        new_row.append(types.InlineKeyboardButton(text="⭐ Saqlandi", callback_data="none"))
+                    else:
+                        new_row.append(button)
+                new_kb_list.append(new_row)
+            
+            await callback.message.edit_reply_markup(
+                reply_markup=types.InlineKeyboardMarkup(inline_keyboard=new_kb_list)
+            )
+
+        except Exception as e:
+            logging.error(f"Postgres Save Error: {e}")
+            await callback.answer("❌ Bazaga saqlashda xatolik yuz berdi.", show_alert=True)
+            
 @router.callback_query(F.data == "cand_settings")
 async def candidate_settings(callback: types.CallbackQuery, db_pool):
     user_id = callback.from_user.id

@@ -43,6 +43,10 @@ class CandidateProfile(StatesGroup):
     waiting_experience = State()
     waiting_photo = State()
     waiting_voice = State() # Ovozli tanishtiruv
+from aiogram.fsm.state import State, StatesGroup
 
+class EmployerReg(StatesGroup):
+    waiting_name = State()
+    waiting_phone = State()
 
 

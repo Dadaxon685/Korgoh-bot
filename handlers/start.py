@@ -113,9 +113,13 @@ async def cmd_start(message: types.Message, db_pool, bot: Bot):
     )
 
 # --- 4. TUGMALAR BOSILGANDA LIFT VA ESKALATOR EFFEKTI ---
+from states.states import EmployerReg # Holatni import qiling
+from aiogram.fsm.context import FSMContext
+
+# ... (eski kodlar)
 
 @router.message(F.text == "🏢 Tadbirkorlar zali (Ish beruvchi)")
-async def emp_reg(message: types.Message, bot: Bot):
+async def emp_reg(message: types.Message, bot: Bot, state: FSMContext):
     await bot.send_chat_action(chat_id=message.chat.id, action="upload_document")
     status = await message.answer("🛗 <b>Lift:</b> <i>10-qavatga ko'tarilmoqdasiz...</i>", parse_mode="HTML")
     await asyncio.sleep(1.2)
@@ -129,63 +133,57 @@ async def emp_reg(message: types.Message, bot: Bot):
         "📌 <b>Ismingizni kiriting:</b>", 
         parse_mode="HTML"
     )
+    await state.set_state(EmployerReg.waiting_name) # ISMNI KUTISH BOSHLANDI
 
-@router.message(F.text == "🔍 Kadrlar bo'limi (Nomzod)")
-async def cand_reg(message: types.Message, bot: Bot):
-    await bot.send_chat_action(chat_id=message.chat.id, action="find_location")
-    status = await message.answer("🪜 <b>Eskalator:</b> <i>2-qavatga chiqmoqdasiz...</i>", parse_mode="HTML")
-    await asyncio.sleep(1.2)
-    await status.delete()
-
+# --- ISMNI QABUL QILISH VA TELEFON SO'RASH ---
+@router.message(EmployerReg.waiting_name)
+async def process_emp_name(message: types.Message, state: FSMContext):
+    await state.update_data(full_name=message.text) # Ismni xotiraga saqlaymiz
+    
+    # Telefon so'rash uchun tugma
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="📞 Telefon raqamni yuborish", request_contact=True)
+    
     await message.answer(
-        "👤 <b>NOMZODLARNI QABUL QILISH ZALI</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "👨‍💼 <b>Maslahatchi:</b>\n"
-        "<blockquote>\"Salom! Ish qidiryapsizmi? To'g'ri joyga keldingiz. Ro'yxatdan o'ting va "
-        "tadbirkorlar siz bilan bog'lanishini kuting!\"</blockquote>\n"
-        "📌 <b>Ism va familiyangizni kiriting:</b>", 
+        f"🤝 Tanishganimdan xursandman, <b>{message.text}</b>!\n\n"
+        "Endi pastdagi tugmani bosish orqali telefon raqamingizni tasdiqlang:",
+        reply_markup=builder.as_markup(resize_keyboard=True),
         parse_mode="HTML"
     )
-@router.message(F.contact)
-async def process_contact(message: types.Message, db_pool, bot: Bot):
+    await state.set_state(EmployerReg.waiting_phone) # RAQAMNI KUTISH
+
+# --- RAQAMNI QABUL QILISH VA TARIFLARGA O'TISH ---
+@router.message(EmployerReg.waiting_phone, F.contact)
+async def process_contact(message: types.Message, state: FSMContext, db_pool, bot: Bot):
     user_id = message.from_user.id
     phone = message.contact.phone_number
-    full_name = message.from_user.full_name
-
-    # Vizual effekt: Ma'lumotlarni bazaga yozish "muhrlash" kabi ko'rinsin
-    await bot.send_chat_action(chat_id=message.chat.id, action="typing")
     
+    # State'dan ismni olamiz
+    user_data = await state.get_data()
+    full_name = user_data.get("full_name", message.from_user.full_name)
+
     async with db_pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO users (user_id, full_name, phone, role)
             VALUES ($1, $2, $3, 'employer')
-            ON CONFLICT (user_id) DO UPDATE SET phone = $3, role = 'employer'
+            ON CONFLICT (user_id) DO UPDATE SET phone = $3, role = 'employer', full_name = $2
         """, user_id, full_name, phone)
 
-    # 1. Kontakt qabul qilinganda (Eski klaviaturani o'chirish)
     await message.answer(
         "📝 <b>Kotiba:</b>\n"
-        "<blockquote>\"Rahmat. Ma'lumotlaringizni bino ro'yxatga olish kitobiga kiritib qo'ydim. "
-        "Raqamingiz tasdiqlandi.\"</blockquote>", 
+        "<blockquote>\"Rahmat. Ma'lumotlaringiz muhrlandi. Raqamingiz tasdiqlandi.\"</blockquote>", 
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
     
-    await asyncio.sleep(1) # Kichik tanaffus effekt uchun
+    await asyncio.sleep(1)
+    await state.clear() # Holatni tozalaymiz
 
-    # 2. Muvaffaqiyatli yakun va tarif tanlash (Ofis tanlash)
-    final_text = (
+    await message.answer(
         "✅ <b>RO'YXATDAN O'TISH YAKUNLANDI</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         "👨‍💼 <b>Administrator:</b>\n"
-        "<blockquote>\"Tabriklayman! Endi siz markazimizning rasmiy a'zosisiz. "
-        "E'lon berishni boshlash uchun o'z biznesingiz darajasiga mos keladigan "
-        "<b>Ofis (Tarif)</b> turini tanlang. Har bir qavatda imkoniyatlar turlicha!\"</blockquote>\n"
-        "👇 <b>Marhamat, tanlov qiling:</b>"
-    )
-    
-    await message.answer(
-        final_text, 
+        "<blockquote>\"Marhamat, endi o'zingizga ma'qul <b>Ofis (Tarif)</b> turini tanlang:\"</blockquote>",
         reply_markup=room_types_keyboard(),
         parse_mode="HTML"
     )

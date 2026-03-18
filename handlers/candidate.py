@@ -16,7 +16,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 router = Router()
 
 # 1. ISH QIDIRISH - XONA RAQAMINI SO'RASH
-@router.callback_query(F.data == "find_job", state="*")
+@router.callback_query(F.data == "find_job")
 async def ask_room_number(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(JobSeeker.waiting_room_num)
     kb = InlineKeyboardBuilder()

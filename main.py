@@ -15,20 +15,26 @@ async def main():
         print("❌ Baza ulanmadi, bot to'xtatildi!")
         return
 
-    bot = Bot(token=os.getenv("BOT_TOKEN")) # .env dan oladi
+    bot = Bot(token=os.getenv("BOT_TOKEN")) 
     dp = Dispatcher()
 
-    # 2. MIDDLEWARENI RO'YXATDAN O'TKAZISH (Routerlardan oldin ulanadi)
+    # 2. MIDDLEWARE (Har doim routerlardan oldin bo'lishi shart)
     dp.update.middleware.register(DbSessionMiddleware(pool))
 
-    dp.include_router(start.router)
-    dp.include_router(employer.router)
+    # 3. ROUTERLAR TARTIBI (Muhim!)
+    # Admin har doim birinchi - uning huquqlari va buyruqlari ustuvor
     dp.include_router(admin.router)
+    
+    # Ish beruvchi va Nomzod routerlari
+    dp.include_router(employer.router)
     dp.include_router(candidate.router)
+    
+    # Start (yoki umumiy) router eng oxirida
+    # Chunki u eng umumiy handlerlarni (masalan, Reply tugmalarini) tutadi
+    dp.include_router(start.router)
 
-    print("🚀 Bot ishga tushdi...")
+    print("🚀 Korgoh_uz tizimi ishga tushdi...")
     await dp.start_polling(bot)
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())

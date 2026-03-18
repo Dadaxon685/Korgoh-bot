@@ -46,8 +46,8 @@ from aiogram import types
 def candidate_panel_keyboard():
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🔍 Ish qidirish", callback_data="find_job"))
-    builder.row(types.InlineKeyboardButton(text="📄 Mening anketam", callback_data="my_resume"))
-    builder.row(types.InlineKeyboardButton(text="📥 Arizalarim holati", callback_data="my_applications"))
+    # builder.row(types.InlineKeyboardButton(text="📄 Mening anketam", callback_data="my_resume"))
+    # builder.row(types.InlineKeyboardButton(text="📥 Arizalarim holati", callback_data="my_applications"))
     builder.row(types.InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="cand_settings"))
     builder.adjust(1)
     return builder.as_markup()

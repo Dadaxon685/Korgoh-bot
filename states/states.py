@@ -20,12 +20,13 @@ class AdCreation(StatesGroup):
 #     specialty = State()
 #     requirements = State()
 
+# from aiogram.fsm.state import State, StatesGroup
+
 class JobSeeker(StatesGroup):
-    
     waiting_room_num = State()   # Xona raqamini kutish
-    choosing_sector = State()     # Sohani tanlash
-    choosing_sub = State()      # Sub-sector ni tanlash
-    filling_form = State()       # Dinamik savol-javob (Ism, rasm, ovoz...)
+    choosing_sector = State()    # Sohani tanlash
+    choosing_sub = State()       # Yo'nalishni tanlash
+    filling_form = State()       # Anketani to'ldirish bosqichi)
 
 class ContactState(StatesGroup):
     choosing_method = State() # Ovoz yoki Xabar tanlash

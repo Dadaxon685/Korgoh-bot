@@ -468,7 +468,26 @@ async def process_reject_reason(message: types.Message, state: FSMContext, bot: 
 
     await state.clear()
 
-
+@router.callback_query(F.data.startswith("rej_cand_"))
+async def reject_candidate(callback: types.CallbackQuery, bot: Bot):
+    candidate_id = int(callback.data.split("_")[2])
+    
+    # Tadbirkor ekranidagi xabarni yangilash
+    await callback.message.edit_caption(
+        caption=callback.message.caption + "\n\n❌ **Ushbu nomzod rad etildi.**",
+        parse_mode="HTML"
+    )
+    
+    # Nomzodga xabar yuborish
+    try:
+        await bot.send_message(
+            candidate_id, 
+            "😔 Kechirasiz, sizning arizangiz ko'rib chiqildi va ish beruvchi tomonidan rad etildi."
+        )
+    except:
+        pass
+    
+    await callback.answer("Nomzod rad etildi.", show_alert=False)
 
 # --- 1. BOG'LANISH TUGMASI BOSILGANDA ---
 @router.callback_query(F.data.startswith("contact_"))

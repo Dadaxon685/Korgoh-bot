@@ -191,59 +191,45 @@ async def process_contact(message: types.Message, state: FSMContext, db_pool, bo
 
 
 
-class CandidateReg(StatesGroup):
-    waiting_name = State()
-    # Keyinchalik yosh yoki soha qo'shsangiz, shu yerga yozasiz
+from aiogram.types import ReplyKeyboardRemove
+from keyboards.inlines import candidate_panel_keyboard # Panel klaviaturasini import qiling
 
- 
-
-# --- NOMZOD RO'YXATDAN O'TISH BOSHLANISHI ---
 @router.message(F.text == "🔍 Kadrlar bo'limi (Nomzod)")
-async def cand_reg(message: types.Message, bot: Bot, state: FSMContext):
+async def candidate_registration(message: types.Message, db_pool, bot: Bot):
+    user_id = message.from_user.id
+    full_name = message.from_user.full_name # Telegramdagi ismini olamiz
+
+    # 1. Lift effekti (Sizning uslubingizda)
     await bot.send_chat_action(chat_id=message.chat.id, action="find_location")
-    status = await message.answer("🪜 <b>Eskalator:</b> <i>2-qavatga chiqmoqdasiz...</i>", parse_mode="HTML")
+    status = await message.answer("🪜 <b>Eskalator:</b> <i>2-qavat, Kadrlar bo'limiga tushmoqdasiz...</i>", parse_mode="HTML")
     await asyncio.sleep(1.2)
     await status.delete()
 
-    await message.answer(
-        "👤 <b>NOMZODLARNI QABUL QILISH ZALI</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "👨‍💼 <b>Maslahatchi:</b>\n"
-        "<blockquote>\"Salom! Ish qidiryapsizmi? To'g'ri joyga keldingiz. "
-        "Ro'yxatdan o'tish uchun ismingizni kiriting:\"</blockquote>", 
-        parse_mode="HTML"
-    )
-    await state.set_state(CandidateReg.waiting_name)
-
-# --- NOMZOD ISMINI QABUL QILISH VA YAKUNLASH ---
-@router.message(CandidateReg.waiting_name)
-async def process_candidate_name(message: types.Message, state: FSMContext, db_pool):
-    full_name = message.text
-    user_id = message.from_user.id
-
+    # 2. Ma'lumotlar bazasiga saqlash (Rolini 'candidate' qilish)
     async with db_pool.acquire() as conn:
-        # Nomzodni bazaga yozamiz
         await conn.execute("""
             INSERT INTO users (user_id, full_name, role)
             VALUES ($1, $2, 'candidate')
-            ON CONFLICT (user_id) DO UPDATE SET full_name = $2, role = 'candidate'
+            ON CONFLICT (user_id) DO UPDATE SET role = 'candidate', full_name = $2
         """, user_id, full_name)
 
+    # 3. Muvaffaqiyatli xabar va Panelni ochish
+    welcome_text = (
+        "🏢 <b>KADRLAR BO'LIMI | REGISTRATURA</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "👩‍💼 <b>Kadrlar menejeri:</b>\n"
+        f"<blockquote>\"Xush kelibsiz, <b>{full_name}</b>! Ma'lumotlaringiz tizimga kiritildi. "
+        "Siz muvaffaqiyatli <b>Ish izlovchi</b> sifatida ro'yxatdan o'tdingiz.\"</blockquote>\n"
+        "✅ <b>Holatingiz:</b> <code>Aktiv Nomzod</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 <b>Quyidagi menyu orqali bo'sh ish o'rinlarini qidirishingiz mumkin:</b>"
+    )
+
     await message.answer(
-        f"✅ <b>Muvaffaqiyatli!</b>\n\n"
-        f"Hurmatli <b>{full_name}</b>, siz tizimda <b>Nomzod</b> bo'lib ro'yxatdan o'tdingiz. "
-        f"Endi o'zingizga mos vakansiyalarni qidirishingiz mumkin!",
-        reply_markup=ReplyKeyboardRemove(), # Eski tugmalarni o'chirish
+        welcome_text, 
+        reply_markup=candidate_panel_keyboard(), # Nomzod panelini chiqaradi
         parse_mode="HTML"
     )
     
-    await asyncio.sleep(1)
-    
-    # Nomzodlar panelini chiqarish
-    await message.answer(
-        "👇 <b>Kadrlar bo'limi boshqaruv paneli:</b>",
-        reply_markup=candidate_panel_keyboard(),
-        parse_mode="HTML"
-    )
-    
-    await state.clear()
+    # Eskidan qolgan Reply tugmalarni o'chirib tashlaymiz
+    # Agar reply_markup=ReplyKeyboardRemove() ishlamasa, alohida xabar yuborsa ham bo'ladi

@@ -18,21 +18,11 @@ async def main():
     bot = Bot(token=os.getenv("BOT_TOKEN")) 
     dp = Dispatcher()
 
-    # 2. MIDDLEWARE (Har doim routerlardan oldin bo'lishi shart)
-    dp.update.middleware.register(DbSessionMiddleware(pool))
-
-    # 3. ROUTERLAR TARTIBI (Muhim!)
-    # Admin har doim birinchi - uning huquqlari va buyruqlari ustuvor
-    dp.include_router(admin.router)
-    
-    # Ish beruvchi va Nomzod routerlari
-    dp.include_router(employer.router)
-    dp.include_router(candidate.router)
-    
-    # Start (yoki umumiy) router eng oxirida
-    # Chunki u eng umumiy handlerlarni (masalan, Reply tugmalarini) tutadi
-    dp.include_router(start.router)
-
+      # 2. Routerlar tartibi:
+    dp.include_router(admin.router)      # 👑 Admin birinchi
+    dp.include_router(employer.router)   # 💼 Tadbirkor ikkinchi
+    dp.include_router(candidate.router)  # 👤 Nomzod uchinchi
+    dp.include_router(start.router)      # 🚀 Start eng oxirida
     print("🚀 Korgoh_uz tizimi ishga tushdi...")
     await dp.start_polling(bot)
 if __name__ == "__main__":

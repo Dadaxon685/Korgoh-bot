@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import LabeledPrice, PreCheckoutQuery, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
 
 from states.states import AdCreation, ContactState
 from keyboards.inlines import (
@@ -49,12 +50,14 @@ def get_number_by_plan(plan):
             f"{b}{b}{b}{a}"
         ]
         return random.choice(patterns)
+    elif plan == "titan":
+        return f"{random.randint(0, 9999):04d}"
     else:
         return f"{random.randint(0, 9999):04d}"
 
 
 # =====================================================
-# 2-QISM: TO'LOV TIZIMI
+# 2-QISM: TO'LOV TIZIMI (XONA SOTIB OLISH)
 # =====================================================
 
 @router.callback_query(F.data.startswith("buy_room_"))
@@ -63,8 +66,12 @@ async def select_room_plan(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(selected_plan=plan)
 
     kb = InlineKeyboardBuilder()
-    kb.row(types.InlineKeyboardButton(text="✅ Davom etish", callback_data="pay_click_1"))
-    kb.row(types.InlineKeyboardButton(text="⬅️ Orqaga", callback_data="buy_room_menu"))
+    kb.row(types.InlineKeyboardButton(
+        text="✅ Davom etish", callback_data="pay_click_1"
+    ))
+    kb.row(types.InlineKeyboardButton(
+        text="⬅️ Orqaga", callback_data="buy_room_menu"
+    ))
 
     await callback.message.edit_text(
         f"Siz <b>{plan.upper()}</b> tarifini tanladingiz.\n"
@@ -75,12 +82,15 @@ async def select_room_plan(callback: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "pay_click_1")
-async def process_click_pay(callback: types.CallbackQuery, bot: Bot, state: FSMContext, db_pool):
+async def process_click_pay(callback: types.CallbackQuery, bot: Bot,
+                             state: FSMContext, db_pool):
     data = await state.get_data()
     plan = data.get("selected_plan", "standard").lower()
 
+    # STANDARD — BEPUL XONA
     if plan == "standard":
         user_id = callback.from_user.id
+
         async with db_pool.acquire() as conn:
             while True:
                 num = get_number_by_plan("standard")
@@ -89,13 +99,15 @@ async def process_click_pay(callback: types.CallbackQuery, bot: Bot, state: FSMC
                 )
                 if not exists:
                     break
+
             await conn.execute(
                 "INSERT INTO rooms (room_number, room_type, owner_id, is_sold) "
                 "VALUES ($1, $2, $3, TRUE)",
                 num, "standard", user_id
             )
             await conn.execute(
-                "UPDATE users SET role = 'employer' WHERE user_id = $1", user_id
+                "UPDATE users SET role = 'employer' WHERE user_id = $1",
+                user_id
             )
 
         await callback.message.edit_text(
@@ -108,8 +120,10 @@ async def process_click_pay(callback: types.CallbackQuery, bot: Bot, state: FSMC
         await state.clear()
         return
 
+    # PULLIK TARIFLAR (SILVER, GOLD)
     prices_map = {"silver": 150000, "gold": 500000}
     amount = prices_map.get(plan)
+
     if not amount:
         return await callback.answer("Noma'lum tarif!")
 
@@ -121,11 +135,16 @@ async def process_click_pay(callback: types.CallbackQuery, bot: Bot, state: FSMC
         payload=f"pay_room_{plan}",
         provider_token=os.getenv("CLICK_TOKEN"),
         currency="UZS",
-        prices=[LabeledPrice(label=f"{plan.capitalize()} xona", amount=amount * 100)]
+        prices=[LabeledPrice(
+            label=f"{plan.capitalize()} xona", amount=amount * 100
+        )]
     )
 
 
-# PRE-CHECKOUT HANDLER — FAQAT 1 TA!
+# =====================================================
+# 3-QISM: PRE-CHECKOUT VA TO'LOV TASDIQLASH
+# =====================================================
+
 @router.pre_checkout_query()
 async def checkout_handler(pre_checkout: PreCheckoutQuery):
     await pre_checkout.answer(ok=True)
@@ -137,8 +156,10 @@ async def unified_payment_handler(message: types.Message, db_pool, bot: Bot):
     user_id = message.from_user.id
 
     try:
+        # BALL SOTIB OLISH
         if "refill_ball" in payload:
             ball_added = int(payload.split("_")[-1])
+
             async with db_pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE users SET balance = COALESCE(balance, 0) + $1 "
@@ -146,8 +167,10 @@ async def unified_payment_handler(message: types.Message, db_pool, bot: Bot):
                     ball_added, user_id
                 )
                 room = await conn.fetchrow(
-                    "SELECT room_number FROM rooms WHERE owner_id = $1", user_id
+                    "SELECT room_number FROM rooms WHERE owner_id = $1",
+                    user_id
                 )
+
             await message.answer(f"✅ Balans to'ldirildi: +{ball_added} ball")
             if room:
                 return await message.answer(
@@ -155,20 +178,25 @@ async def unified_payment_handler(message: types.Message, db_pool, bot: Bot):
                     reply_markup=employer_panel_keyboard(room['room_number'])
                 )
 
+        # XONA SOTIB OLISH
         elif "buy_room" in payload or "pay_" in payload:
             plan = payload.split("_")[-1]
+
             async with db_pool.acquire() as conn:
                 num = get_number_by_plan(plan)
                 await conn.execute(
                     "UPDATE users SET role = 'employer' WHERE user_id = $1",
                     user_id
                 )
-                await conn.execute("DELETE FROM rooms WHERE owner_id = $1", user_id)
+                await conn.execute(
+                    "DELETE FROM rooms WHERE owner_id = $1", user_id
+                )
                 await conn.execute(
                     "INSERT INTO rooms (room_number, room_type, owner_id, is_sold) "
                     "VALUES ($1, $2, $3, TRUE)",
                     num, plan, user_id
                 )
+
             await message.answer(
                 f"🎊 Tabriklaymiz! To'lov muvaffaqiyatli!\n"
                 f"🏢 Sizning xonangiz: <b>{num}</b>",
@@ -180,14 +208,15 @@ async def unified_payment_handler(message: types.Message, db_pool, bot: Bot):
             )
 
     except Exception as e:
-        print(f"XATOLIK: {e}")
+        print(f"XATOLIK YUZ BERDI: {e}")
         await message.answer(
-            "⚠️ To'lov qabul qilindi, lekin xato chiqdi. Admin bilan bog'laning."
+            "⚠️ To'lov qabul qilindi, lekin ma'lumotlarni yangilashda "
+            "xato chiqdi. Admin bilan bog'laning."
         )
 
 
 # =====================================================
-# 3-QISM: PANEL
+# 4-QISM: PANEL KOMANDASI
 # =====================================================
 
 @router.message(Command("panel"))
@@ -221,8 +250,7 @@ async def show_panel(message: types.Message, db_pool):
 
     if str(user_id) == os.getenv("ADMIN_ID"):
         await message.answer(
-            "👑 **Admin paneli**",
-            reply_markup=admin_panel_keyboard()
+            "👑 **Admin paneli**", reply_markup=admin_panel_keyboard()
         )
 
 
@@ -248,7 +276,7 @@ async def back_to_employer_panel(callback: types.CallbackQuery, db_pool):
 
 
 # =====================================================
-# 4-QISM: E'LON YARATISH
+# 5-QISM: E'LON YARATISH
 # =====================================================
 
 @router.callback_query(F.data == "new_ad")
@@ -267,8 +295,7 @@ async def start_ad(callback: types.CallbackQuery, state: FSMContext, db_pool):
     await state.set_state(AdCreation.sector)
     await callback.message.edit_text(
         "📝 <b>Sohani tanlang:</b>",
-        reply_markup=sectors_keyboard(),
-        parse_mode="HTML"
+        reply_markup=sectors_keyboard(), parse_mode="HTML"
     )
 
 
@@ -279,7 +306,7 @@ async def process_sector(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdCreation.custom_service)
     await callback.message.edit_text(
         f"✅ Soha: <b>{sector_name}</b>\n"
-        "📝 Yo'nalishni yozing (masalan: Backend Developer):",
+        f"📝 Yo'nalishni yozing (masalan: Backend Developer):",
         parse_mode="HTML"
     )
 
@@ -316,8 +343,7 @@ async def ask_region(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdCreation.region)
     await callback.message.edit_text(
         "📍 <b>Ish qaysi hududda? (Viloyatni tanlang):</b>",
-        reply_markup=regions_keyboard(),
-        parse_mode="HTML"
+        reply_markup=regions_keyboard(), parse_mode="HTML"
     )
 
 
@@ -332,8 +358,7 @@ async def process_region(callback: types.CallbackQuery, state: FSMContext):
     kb.button(text="🏢 Offline", callback_data="type_Offline")
     await callback.message.edit_text(
         f"📍 Hudud: {region}\n💻 <b>Ish turini tanlang:</b>",
-        reply_markup=kb.as_markup(),
-        parse_mode="HTML"
+        reply_markup=kb.as_markup(), parse_mode="HTML"
     )
 
 
@@ -391,19 +416,22 @@ async def preview_ad(message: types.Message, state: FSMContext):
     kb.adjust(1)
 
     await state.set_state(AdCreation.confirm)
-    await message.answer(preview_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await message.answer(
+        preview_text, reply_markup=kb.as_markup(), parse_mode="HTML"
+    )
 
 
 @router.callback_query(AdCreation.confirm, F.data == "confirm_ad_final")
 async def send_to_admin_final(callback: types.CallbackQuery, state: FSMContext,
-                               bot: Bot, db_pool):
+                                bot: Bot, db_pool):
     data = await state.get_data()
     user = callback.from_user
 
     async with db_pool.acquire() as conn:
         ad_id = await conn.fetchval("""
-            INSERT INTO ads (owner_id, soha, sub_sector, region, job_type,
-                           salary, work_time, selected_reqs, status)
+            INSERT INTO ads (owner_id, soha, sub_sector, region,
+                             job_type, salary, work_time,
+                             selected_reqs, status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
             RETURNING id
         """, user.id, data['chosen_sector'], data['chosen_sub'],
@@ -421,14 +449,18 @@ async def send_to_admin_final(callback: types.CallbackQuery, state: FSMContext,
         f"(<a href='tg://user?id={user.id}'>Profil</a>)\n"
         f"🏢 <b>Soha:</b> {data['chosen_sector']}\n"
         f"🎯 <b>Yo'nalish:</b> {data['chosen_sub']}\n"
-        f"📍 <b>Hudud:</b> {data['chosen_region']} ({data['chosen_job_type']})\n"
+        f"📍 <b>Hudud:</b> {data['chosen_region']} "
+        f"({data['chosen_job_type']})\n"
         f"💰 <b>Maosh:</b> {data['chosen_salary']}\n"
         f"⏰ <b>Ish vaqti:</b> {data['chosen_work_time']}\n"
         f"📋 <b>Talablar:</b> {reqs_list}"
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Tasdiqlash (Kanalga)", callback_data=f"approve_{user.id}")
+    kb.button(
+        text="✅ Tasdiqlash (Kanalga)",
+        callback_data=f"approve_{user.id}"
+    )
     kb.button(
         text="❌ Rad etish (Sabab bilan)",
         callback_data=f"reject_ask_{ad_id}_{user.id}"
@@ -439,7 +471,6 @@ async def send_to_admin_final(callback: types.CallbackQuery, state: FSMContext,
         os.getenv("ADMIN_ID"), admin_text,
         reply_markup=kb.as_markup(), parse_mode="HTML"
     )
-
     await callback.message.edit_text(
         "🚀 <b>Rahmat! E'loningiz adminga yuborildi.</b>",
         parse_mode="HTML"
@@ -456,7 +487,7 @@ async def cancel_ad(callback: types.CallbackQuery, state: FSMContext):
 
 
 # =====================================================
-# 5-QISM: RAD ETISH (Reject)
+# 6-QISM: RAD ETISH (ADMIN)
 # =====================================================
 
 @router.callback_query(F.data.startswith("reject_ask_"))
@@ -478,7 +509,7 @@ async def ask_reject_reason(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(AdCreation.reject_reason)
 async def process_reject_reason(message: types.Message, state: FSMContext,
-                                 bot: Bot, db_pool):
+                                  bot: Bot, db_pool):
     if message.from_user.id != int(os.getenv("ADMIN_ID")):
         return
 
@@ -502,13 +533,16 @@ async def process_reject_reason(message: types.Message, state: FSMContext,
         )
         await message.answer("✅ Sabab tadbirkorga yuborildi.")
     except Exception:
-        await message.answer("⚠️ Tadbirkorga xabar yuborib bo'lmadi.")
+        await message.answer(
+            "⚠️ Tadbirkorga xabar yuborib bo'lmadi "
+            "(bloklagan bo'lishi mumkin)."
+        )
 
     await state.clear()
 
 
 # =====================================================
-# 6-QISM: NOMZODNI RAD ETISH (rej_cand) — FAQAT SHU YERDA!
+# 7-QISM: NOMZODLARNI BOSHQARISH (Contact, Reject)
 # =====================================================
 
 @router.callback_query(F.data.startswith("rej_cand_"))
@@ -516,15 +550,16 @@ async def reject_candidate(callback: types.CallbackQuery, bot: Bot):
     candidate_id = int(callback.data.split("_")[2])
 
     try:
-        # Rasm + caption bo'lsa
         if callback.message.caption:
             await callback.message.edit_caption(
-                caption=callback.message.caption + "\n\n❌ <b>Ushbu nomzod rad etildi.</b>",
+                caption=callback.message.caption +
+                        "\n\n❌ <b>Ushbu nomzod rad etildi.</b>",
                 parse_mode="HTML"
             )
         else:
             await callback.message.edit_text(
-                callback.message.text + "\n\n❌ <b>Ushbu nomzod rad etildi.</b>",
+                callback.message.text +
+                "\n\n❌ <b>Ushbu nomzod rad etildi.</b>",
                 parse_mode="HTML"
             )
     except Exception:
@@ -533,17 +568,14 @@ async def reject_candidate(callback: types.CallbackQuery, bot: Bot):
     try:
         await bot.send_message(
             candidate_id,
-            "😔 Kechirasiz, arizangiz ish beruvchi tomonidan rad etildi."
+            "😔 Kechirasiz, arizangiz ko'rib chiqildi va "
+            "ish beruvchi tomonidan rad etildi."
         )
     except Exception:
         pass
 
     await callback.answer("Nomzod rad etildi.", show_alert=False)
 
-
-# =====================================================
-# 7-QISM: BOG'LANISH (Contact)
-# =====================================================
 
 @router.callback_query(F.data.startswith("contact_"))
 async def start_contact(callback: types.CallbackQuery, state: FSMContext):
@@ -552,12 +584,17 @@ async def start_contact(callback: types.CallbackQuery, state: FSMContext):
 
     kb = InlineKeyboardBuilder()
     kb.row(
-        types.InlineKeyboardButton(text="🎤 Ovozli", callback_data="type_voice"),
-        types.InlineKeyboardButton(text="📝 Xabar", callback_data="type_text")
+        types.InlineKeyboardButton(
+            text="🎤 Ovozli (Golos)", callback_data="type_voice"
+        ),
+        types.InlineKeyboardButton(
+            text="📝 Xabar (Uchrashuv)", callback_data="type_text"
+        )
     )
 
     await callback.message.answer(
-        "Ishchi bilan qanday bog'lanamiz?", reply_markup=kb.as_markup()
+        "Ishchi bilan qanday bog'lanamiz?",
+        reply_markup=kb.as_markup()
     )
     await state.set_state(ContactState.choosing_method)
     await callback.answer()
@@ -565,13 +602,15 @@ async def start_contact(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(ContactState.choosing_method, F.data == "type_voice")
 async def ask_voice(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("🎤 Ishchi uchun ovozli xabaringizni yuboring:")
+    await callback.message.edit_text(
+        "🎤 Ishchi uchun ovozli xabaringizni yuboring:"
+    )
     await state.set_state(ContactState.waiting_voice)
 
 
 @router.message(ContactState.waiting_voice, F.voice)
 async def send_voice_to_candidate(message: types.Message, state: FSMContext,
-                                   bot: Bot):
+                                    bot: Bot):
     data = await state.get_data()
     await bot.send_message(
         data['candidate_id'],
@@ -596,17 +635,22 @@ async def ask_details(callback: types.CallbackQuery, state: FSMContext):
 @router.message(ContactState.waiting_details)
 async def ask_location(message: types.Message, state: FSMContext):
     await state.update_data(meeting_info=message.text)
+
     kb = ReplyKeyboardBuilder()
     kb.button(text="📍 Lokatsiya yuborish", request_location=True)
+
     await message.answer(
         "📍 Endi uchrashuv joyi (lokatsiya)ni yuboring:",
-        reply_markup=kb.as_markup(resize_keyboard=True, one_time_keyboard=True)
+        reply_markup=kb.as_markup(
+            resize_keyboard=True, one_time_keyboard=True
+        )
     )
     await state.set_state(ContactState.waiting_location)
 
 
 @router.message(ContactState.waiting_location, F.location)
-async def finalize_contact(message: types.Message, state: FSMContext, bot: Bot):
+async def finalize_contact(message: types.Message, state: FSMContext,
+                            bot: Bot):
     data = await state.get_data()
     candidate_id = data['candidate_id']
     info = data['meeting_info']
@@ -616,9 +660,12 @@ async def finalize_contact(message: types.Message, state: FSMContext, bot: Bot):
         f"📝 <b>Ma'lumot:</b> {info}\n"
         "📍 <b>Manzil:</b> Pastdagi lokatsiya bo'yicha kelishingiz mumkin."
     )
+
     await bot.send_message(candidate_id, text_to_cand, parse_mode="HTML")
     await bot.send_location(
-        candidate_id, message.location.latitude, message.location.longitude
+        candidate_id,
+        message.location.latitude,
+        message.location.longitude
     )
     await message.answer(
         "✅ Ma'lumotlar ishchiga yuborildi!",
@@ -630,94 +677,98 @@ async def finalize_contact(message: types.Message, state: FSMContext, bot: Bot):
 # =====================================================
 # 8-QISM: SAQLANGAN NOMZODLAR (FAVORITES) — TUZATILDI!
 # =====================================================
+# ❌ ESKI MUAMMO:
+#   1) fav_ prefiksi fav_page_ ni ham ushlab olardi
+#   2) info_json ustuni bazada yo'q edi
+#   3) State bo'sh qaytardi
 #
-# MUHIM TUZATISHLAR:
-# 1. "savefav_" prefiksi ishlatiladi ("fav_" emas!)
-#    Sabab: "fav_" prefiksi "fav_page_" ni ham ushlardi
-#    va int("page") → ValueError xatosi chiqardi
-#
-# 2. Ma'lumot xabar matnidan (caption/text) ajratib olinadi
-#    Sabab: State NOMZODNIKI, tadbirkornikida bo'sh bo'ladi
-#
-# 3. Baza ustun nomlari bir xil qilindi (owner_id)
-#
-# 4. Pagination alohida handler bilan ishlaydi
-#
+# ✅ TUZATILDI:
+#   1) savefav_ prefiksi ishlatilmoqda (fav_page_ bilan conflict yo'q)
+#   2) info_json bo'lmasa xabar matnidan parsing qilinadi
+#   3) State o'rniga xabar matnidan ma'lumot olinadi
 
 @router.callback_query(F.data.startswith("savefav_"))
 async def save_to_favorites(callback: types.CallbackQuery, db_pool):
-    """Nomzodni saqlanganlar ro'yxatiga qo'shish"""
+    """Nomzodni saqlanganlarga qo'shish"""
+    # 1. Candidate ID ni olish: savefav_12345678
     try:
-        # savefav_12345678 → 12345678
         candidate_id = int(callback.data.replace("savefav_", ""))
     except (IndexError, ValueError):
         return await callback.answer("❌ ID xatosi", show_alert=True)
 
     owner_id = callback.from_user.id
 
-    # ====================================================
-    # XABAR MATNIDAN MA'LUMOT AJRATIB OLISH
-    # (State NOMZODNIKI — tadbirkor state'ida bo'sh bo'ladi!)
-    # ====================================================
+    # 2. Xabar matnidan ma'lumotlarni ajratib olish
+    # (State ishlamasligi mumkin — chunki bu TADBIRKOR ekrani)
     answers = {}
-    msg_text = callback.message.caption or callback.message.text or ""
+    msg_text = (
+        callback.message.caption
+        if callback.message.caption
+        else callback.message.text
+    )
 
-    # Matndan ma'lumotlarni ajratib olish
-    lines = msg_text.split('\n')
-    for line in lines:
-        if "Ism:" in line:
-            answers['full_name'] = line.split("Ism:")[1].strip()
-        elif "Yosh:" in line:
-            answers['age'] = line.split("Yosh:")[1].strip()
-        elif "Tel:" in line:
-            answers['phone'] = line.split("Tel:")[1].strip()
-        elif "Tajriba:" in line:
-            answers['experience'] = line.split("Tajriba:")[1].strip()
-        elif "Manzil:" in line:
-            answers['address'] = line.split("Manzil:")[1].strip()
-        elif "Tillar:" in line:
-            answers['languages'] = line.split("Tillar:")[1].strip()
-        elif "Ma'lumot:" in line and "Ma'lumot:" in line:
-            answers['education'] = line.split("Ma'lumot:")[1].strip()
-        elif "Maosh:" in line:
-            answers['expected_salary'] = line.split("Maosh:")[1].strip()
-        elif "Yo'nalish:" in line:
-            answers['direction'] = line.split("Yo'nalish:")[1].strip()
-        elif "Nomzod:" in line:
-            # <a href=...>Name</a> formatidan ismni olish
-            if ">" in line and "</" in line:
-                try:
-                    name_part = line.split(">")[1].split("<")[0]
-                    answers['candidate_name'] = name_part.strip()
-                except Exception:
-                    pass
+    if msg_text:
+        lines = msg_text.split('\n')
+        for line in lines:
+            if "Ism" in line and ":" in line:
+                answers['full_name'] = line.split(":", 1)[1].strip()
+            elif "Yosh" in line and ":" in line:
+                answers['age'] = line.split(":", 1)[1].strip()
+            elif "Tel" in line and ":" in line:
+                answers['phone'] = line.split(":", 1)[1].strip()
+            elif "Tajriba" in line and ":" in line:
+                answers['experience'] = line.split(":", 1)[1].strip()
+            elif "Manzil" in line and ":" in line:
+                answers['address'] = line.split(":", 1)[1].strip()
+            elif "Yo'nalish" in line and ":" in line:
+                answers['direction'] = line.split(":", 1)[1].strip()
 
-    # Agar rasm bo'lsa, file_id ni saqlaymiz
+    # Rasm ID sini olish
     if callback.message.photo:
         answers['photo'] = callback.message.photo[-1].file_id
 
-    # JSON ga o'giramiz
     info_json = json.dumps(answers, ensure_ascii=False)
 
-    # Bazaga yozish
+    # 3. Bazaga yozish (info_json bor-yo'qligini tekshiradi)
     async with db_pool.acquire() as conn:
+        # Avval jadval tuzilmasini tekshiramiz
+        has_info_col = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'favorites' 
+                AND column_name = 'info_json'
+            )
+        """)
+
+        # Mavjudligini tekshirish
         exists = await conn.fetchval(
-            "SELECT id FROM favorites WHERE owner_id = $1 AND candidate_id = $2",
+            "SELECT id FROM favorites "
+            "WHERE owner_id = $1 AND candidate_id = $2",
             owner_id, candidate_id
         )
+
         if not exists:
-            await conn.execute(
-                "INSERT INTO favorites (owner_id, candidate_id, info_json) "
-                "VALUES ($1, $2, $3)",
-                owner_id, candidate_id, info_json
-            )
+            if has_info_col:
+                await conn.execute(
+                    "INSERT INTO favorites "
+                    "(owner_id, candidate_id, info_json) "
+                    "VALUES ($1, $2, $3)",
+                    owner_id, candidate_id, info_json
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO favorites "
+                    "(owner_id, candidate_id) "
+                    "VALUES ($1, $2)",
+                    owner_id, candidate_id
+                )
             text = "⭐ Nomzod saralanganlarga saqlandi!"
         else:
             text = "⚠️ Bu nomzod allaqachon ro'yxatingizda bor."
 
     await callback.answer(text, show_alert=True)
 
-    # Tugmani yangilash — "Saqlandi" qilib qo'yamiz
+    # 4. Tugmani yangilash
     try:
         current_kb = callback.message.reply_markup.inline_keyboard
         new_kb_list = []
@@ -736,22 +787,27 @@ async def save_to_favorites(callback: types.CallbackQuery, db_pool):
             new_kb_list.append(new_row)
 
         await callback.message.edit_reply_markup(
-            reply_markup=types.InlineKeyboardMarkup(inline_keyboard=new_kb_list)
+            reply_markup=types.InlineKeyboardMarkup(
+                inline_keyboard=new_kb_list
+            )
         )
     except Exception:
         pass
 
 
-# PAGINATION — fav_page_ alohida handler!
+# --- SAQLANGANLARNI KO'RISH (PAGINATION) ---
+
 @router.callback_query(F.data == "view_favorites")
-async def view_favorites_start(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """Saqlanganlar ro'yxatini birinchi sahifadan ko'rsatish"""
+async def view_favorites_start(callback: types.CallbackQuery,
+                                db_pool, bot: Bot):
+    """Birinchi sahifani ko'rsatish"""
     await show_favorites_paged(callback, db_pool, bot, page=0)
 
 
 @router.callback_query(F.data.startswith("fav_page_"))
-async def view_favorites_page(callback: types.CallbackQuery, db_pool, bot: Bot):
-    """Saqlanganlar ro'yxatini tanlangan sahifadan ko'rsatish"""
+async def view_favorites_page(callback: types.CallbackQuery,
+                               db_pool, bot: Bot):
+    """Tanlangan sahifani ko'rsatish"""
     try:
         page = int(callback.data.replace("fav_page_", ""))
     except ValueError:
@@ -761,36 +817,80 @@ async def view_favorites_page(callback: types.CallbackQuery, db_pool, bot: Bot):
 
 async def show_favorites_paged(callback: types.CallbackQuery, db_pool,
                                 bot: Bot, page: int = 0):
-    """Saqlanganlar ro'yxatini sahifalab ko'rsatish (yordamchi funksiya)"""
+    """Yordamchi funksiya: sahifalab ko'rsatish"""
     async with db_pool.acquire() as conn:
-        favs = await conn.fetch(
-            "SELECT candidate_id, info_json FROM favorites "
-            "WHERE owner_id = $1 ORDER BY id DESC",
-            callback.from_user.id
-        )
+        # 1. info_json ustuni borligini tekshirish
+        has_info_col = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'favorites' 
+                AND column_name = 'info_json'
+            )
+        """)
+
+        # 2. Tegishli so'rov
+        if has_info_col:
+            favs = await conn.fetch(
+                "SELECT candidate_id, info_json "
+                "FROM favorites WHERE owner_id = $1 "
+                "ORDER BY id DESC",
+                callback.from_user.id
+            )
+        else:
+            favs = await conn.fetch(
+                "SELECT candidate_id "
+                "FROM favorites WHERE owner_id = $1 "
+                "ORDER BY id DESC",
+                callback.from_user.id
+            )
 
     if not favs:
         return await callback.answer(
-            "⭐ Saralangan nomzodlar hozircha yo'q.", show_alert=True
+            "⭐ Saralangan nomzodlar hozircha yo'q.",
+            show_alert=True
         )
 
     total_count = len(favs)
-
-    # Sahifa chegarasini tekshirish
     if page < 0:
         page = 0
     if page >= total_count:
         page = total_count - 1
 
     f = favs[page]
-    data = json.loads(f['info_json'])
     candidate_id = f['candidate_id']
 
-    # Matn tayyorlash
+    # 3. Ma'lumotlarni olish
+    data = {}
+    if has_info_col and f.get('info_json'):
+        try:
+            data = json.loads(f['info_json'])
+        except (json.JSONDecodeError, TypeError):
+            data = {}
+
+    # Agar info_json bo'sh bo'lsa, users jadvalidan olishga harakat
+    if not data:
+        async with db_pool.acquire() as conn:
+            user_info = await conn.fetchrow(
+                "SELECT full_name, age, category, experience "
+                "FROM users WHERE user_id = $1",
+                candidate_id
+            )
+        if user_info:
+            if user_info.get('full_name'):
+                data['full_name'] = user_info['full_name']
+            if user_info.get('age'):
+                data['age'] = str(user_info['age'])
+            if user_info.get('category'):
+                data['direction'] = user_info['category']
+            if user_info.get('experience'):
+                data['experience'] = user_info['experience']
+
+    # 4. Matn tayyorlash
     summary = (
         f"⭐ <b>Saralangan nomzod ({page + 1}/{total_count})</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Nomzod:</b> <a href='tg://user?id={candidate_id}'>Profil</a>\n"
+        f"👤 <b>Nomzod:</b> "
+        f"<a href='tg://user?id={candidate_id}'>Profil</a>\n"
         f"🆔 <b>ID:</b> <code>{candidate_id}</code>\n"
     )
 
@@ -806,16 +906,19 @@ async def show_favorites_paged(callback: types.CallbackQuery, db_pool,
             label = pretty_names.get(key, key.capitalize())
             summary += f"🔹 <b>{label}:</b> {val}\n"
 
+    if not data or len(data) == 0:
+        summary += "\nℹ️ <i>Batafsil ma'lumot mavjud emas</i>\n"
+
     reply_markup = get_fav_keyboard(candidate_id, page, total_count)
 
-    # Eski xabarni o'chirib, yangisini yuborish
+    # 5. Eski xabarni o'chirib yangisini yuborish
     try:
         await callback.message.delete()
     except Exception:
         pass
 
     try:
-        if 'photo' in data:
+        if 'photo' in data and data['photo']:
             await callback.message.answer_photo(
                 photo=data['photo'],
                 caption=summary,
@@ -824,7 +927,9 @@ async def show_favorites_paged(callback: types.CallbackQuery, db_pool,
             )
         else:
             await callback.message.answer(
-                summary, reply_markup=reply_markup, parse_mode="HTML"
+                summary,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
             )
     except Exception as e:
         print(f"Favorites pagination xatosi: {e}")
@@ -839,12 +944,12 @@ async def remove_favorite(callback: types.CallbackQuery, db_pool, bot: Bot):
 
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "DELETE FROM favorites WHERE owner_id = $1 AND candidate_id = $2",
+            "DELETE FROM favorites "
+            "WHERE owner_id = $1 AND candidate_id = $2",
             callback.from_user.id, candidate_id
         )
 
     await callback.answer("🗑 Ro'yxatdan o'chirildi.")
-    # Ro'yxatni yangilash
     await show_favorites_paged(callback, db_pool, bot, page=0)
 
 
@@ -918,7 +1023,8 @@ async def process_xarid_ball(callback: types.CallbackQuery, bot: Bot):
         provider_token=os.getenv("CLICK_TOKEN"),
         currency="UZS",
         prices=[types.LabeledPrice(
-            label=f"{ball_amount} ball", amount=selected_price * 100
+            label=f"{ball_amount} ball",
+            amount=selected_price * 100
         )],
         payload=invoice_payload,
         start_parameter="refill",
@@ -947,7 +1053,8 @@ async def show_my_sectors(callback: types.CallbackQuery, db_pool):
 
     for s in sectors:
         kb.row(types.InlineKeyboardButton(
-            text=f"📁 {s['soha']}", callback_data=f"del_sec_{s['soha']}"
+            text=f"📁 {s['soha']}",
+            callback_data=f"del_sec_{s['soha']}"
         ))
     kb.row(types.InlineKeyboardButton(
         text="⬅️ Orqaga", callback_data="employer_panel"
@@ -1013,10 +1120,13 @@ async def confirm_delete_ad(callback: types.CallbackQuery, db_pool):
     )
 
     await callback.message.edit_text(
-        f"⚠️ <b>DIQQAT!</b>\n\n"
-        f"Siz haqiqatdan ham <b>{ad['soha']}</b> -> "
-        f"<b>{ad['sub_sector']}</b> e'lonini o'chirib tashlamoqchimisiz?\n"
-        f"Bu amalni ortga qaytarib bo'lmaydi!",
+        text=(
+            f"⚠️ <b>DIQQAT!</b>\n\n"
+            f"Siz haqiqatdan ham <b>{ad['soha']}</b> -> "
+            f"<b>{ad['sub_sector']}</b> e'lonini "
+            f"o'chirib tashlamoqchimisiz?\n"
+            f"Bu amalni ortga qaytarib bo'lmaydi!"
+        ),
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
@@ -1025,9 +1135,13 @@ async def confirm_delete_ad(callback: types.CallbackQuery, db_pool):
 @router.callback_query(F.data.startswith("final_delete_"))
 async def delete_ad(callback: types.CallbackQuery, db_pool):
     ad_id = int(callback.data.split("_")[2])
+
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM ads WHERE id = $1", ad_id)
-    await callback.answer("🗑 E'lon muvaffaqiyatli o'chirildi!", show_alert=True)
+
+    await callback.answer(
+        "🗑 E'lon muvaffaqiyatli o'chirildi!", show_alert=True
+    )
     await show_my_sectors(callback, db_pool)
 
 
@@ -1052,7 +1166,10 @@ async def employer_settings(callback: types.CallbackQuery, db_pool):
         f"📊 **Statistika:**\n"
         f"└ Jami e'lonlaringiz: {settings['ads_count']} ta\n"
         f"└ Joriy balans: {settings['balance'] or 0} ⭐\n\n"
-        "🔧 **Funksiyalar:**"
+        "🔧 **Funksiyalar:**\n"
+        "• Bildirishnomalarni boshqarish\n"
+        "• Avto-javob matnini sozlash\n"
+        "• Ish vaqtini belgilash"
     )
 
     kb = InlineKeyboardBuilder()
@@ -1073,8 +1190,7 @@ async def employer_settings(callback: types.CallbackQuery, db_pool):
         callback_data="delete_profile_start"
     ))
     kb.row(types.InlineKeyboardButton(
-        text="⬅️ Orqaga",
-        callback_data="employer_panel"
+        text="⬅️ Orqaga", callback_data="employer_panel"
     ))
     kb.adjust(1)
 
@@ -1091,7 +1207,7 @@ async def view_analytics(callback: types.CallbackQuery, db_pool):
         stats = await conn.fetchrow("""
             SELECT
                 COUNT(*) as total_ads,
-                SUM(view_count) as total_views,
+                SUM(COALESCE(view_count, 0)) as total_views,
                 (SELECT COUNT(*) FROM favorites
                  WHERE owner_id = $1) as saved_candidates
             FROM ads WHERE owner_id = $1
@@ -1115,16 +1231,28 @@ async def view_analytics(callback: types.CallbackQuery, db_pool):
     )
 
 
+# =====================================================
+# 12-QISM: PROFILNI O'CHIRISH
+# =====================================================
+
 @router.callback_query(F.data == "delete_profile_start")
 async def confirm_delete_profile(callback: types.CallbackQuery):
     text = (
         "⚠️ <b>DIQQAT: QAYTARIB BO'LMAS AMAL!</b>\n\n"
-        "Profilni o'chirsangiz, barcha ma'lumotlar yo'qoladi."
+        "Profilni o'chirsangiz, quyidagi ma'lumotlar "
+        "<b>butunlay yo'qoladi:</b>\n"
+        "• Siz sotib olgan barcha xona raqamlari\n"
+        "• Barcha e'lonlaringiz va statistikalar\n"
+        "• Hisobingizdagi mavjud ballar (yulduzlar)\n"
+        "• Saqlangan barcha nomzodlar\n\n"
+        "<i>Tizimda siz haqingizda hech qanday "
+        "ma'lumot qolmaydi. Buni tasdiqlaysizmi?</i>"
     )
 
     kb = InlineKeyboardBuilder()
     kb.row(types.InlineKeyboardButton(
-        text="❌ Yo'q, bekor qilish", callback_data="emp_settings"
+        text="❌ Yo'q, bekor qilish",
+        callback_data="emp_settings"
     ))
     kb.row(types.InlineKeyboardButton(
         text="🗑 HA, HAMMASINI O'CHIRISH",
@@ -1137,37 +1265,31 @@ async def confirm_delete_profile(callback: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "delete_profile_final")
-async def delete_profile_execution(callback: types.CallbackQuery, db_pool,
-                                    state: FSMContext):
+async def delete_profile_execution(callback: types.CallbackQuery,
+                                     db_pool, state: FSMContext):
     user_id = callback.from_user.id
 
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute("DELETE FROM ads WHERE owner_id = $1", user_id)
-            await conn.execute("DELETE FROM rooms WHERE owner_id = $1", user_id)
+            await conn.execute(
+                "DELETE FROM ads WHERE owner_id = $1", user_id
+            )
+            await conn.execute(
+                "DELETE FROM rooms WHERE owner_id = $1", user_id
+            )
             await conn.execute(
                 "DELETE FROM favorites WHERE owner_id = $1", user_id
             )
-            await conn.execute("DELETE FROM users WHERE user_id = $1", user_id)
+            await conn.execute(
+                "DELETE FROM users WHERE user_id = $1", user_id
+            )
 
     await state.clear()
 
     await callback.message.edit_text(
         "👋 <b>Hisobingiz muvaffaqiyatli o'chirildi.</b>\n\n"
+        "Siz bilan hamkorlik qilganimizdan xursandmiz. "
         "Yana qaytib kelishingizni kutamiz!",
         parse_mode="HTML"
     )
     await callback.answer("Profil o'chirildi", show_alert=True)
-
-
-# =====================================================
-# MUHIM ESLATMA:
-# =====================================================
-# candidate.py dagi "send_to_employer" handlerida
-# tugma callback_data si HAM o'zgarishi kerak:
-#
-# ESKI:  callback_data=f"fav_{candidate_id}"
-# YANGI: callback_data=f"savefav_{candidate_id}"
-#
-# Bu o'zgarishni candidate.py da ham qiling!
-# =====================================================

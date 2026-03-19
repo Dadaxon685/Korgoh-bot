@@ -373,7 +373,7 @@ async def send_to_employer(callback: types.CallbackQuery, state: FSMContext, bot
         ),
         types.InlineKeyboardButton(
             text="⭐ Saqlash",
-            callback_data=f"fav_{candidate_id}"
+            callback_data=f"savefav_{candidate_id}"
         )
     )
     kb.row(types.InlineKeyboardButton(

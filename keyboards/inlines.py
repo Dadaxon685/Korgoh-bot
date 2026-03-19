@@ -23,11 +23,11 @@ def room_types_keyboard():
         callback_data="buy_room_gold") # 'gold' koddagi lug'atga mos
     )
     
-    # 4. Orqaga tugmasini ham qo'shib qo'yamiz (har ehtimolga qarshi)
-    builder.row(types.InlineKeyboardButton(
-        text="⬅️ Bekor qilish", 
-        callback_data="employer_panel")
-    )
+    # # 4. Orqaga tugmasini ham qo'shib qo'yamiz (har ehtimolga qarshi)
+    # builder.row(types.InlineKeyboardButton(
+    #     text="⬅️ Bekor qilish", 
+    #     callback_data="employer_panel")
+    # )
     
     builder.adjust(1)
     return builder.as_markup()
